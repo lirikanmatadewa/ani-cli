@@ -1,6 +1,6 @@
 #!/bin/sh
 
-version_number="4.8.12"
+version_number="4.9.0"
 
 # UI
 
@@ -45,6 +45,8 @@ help_info() {
         Download the video instead of playing it
       -D, --delete
         Delete history
+      -l, --logview
+        Show logs
       -s, --syncplay
         Use Syncplay to watch with friends
       -S, --select-nth
@@ -111,6 +113,13 @@ dep_ch() {
     for dep; do
         command -v "$dep" >/dev/null || die "Program \"$dep\" not found. Please install it."
     done
+}
+
+where_iina() {
+    [ -n "$ANI_CLI_PLAYER" ] && printf "%s" "$ANI_CLI_PLAYER" && return 0
+    command -v iina >/dev/null && printf "iina" && return 0
+    [ -e "/Applications/IINA.app/Contents/MacOS/iina-cli" ] && echo "/Applications/IINA.app/Contents/MacOS/iina-cli" && return 0
+    dep_ch iina # exit with formating
 }
 
 # SCRAPING
@@ -249,6 +258,7 @@ download() {
 }
 
 play_episode() {
+    [ "$log_episode" = 1 ] && [ "$player_function" != "debug" ] && [ "$player_function" != "download" ] && command -v logger >/dev/null && logger -t ani-cli "${allanime_title}${ep_no}"
     [ "$skip_intro" = 1 ] && skip_flag="$(ani-skip -q "$mal_id" -e "$ep_no")"
     [ -z "$episode" ] && get_episode_url
     # shellcheck disable=SC2086
@@ -268,7 +278,7 @@ play_episode() {
             ;;
         android_mpv) nohup am start --user 0 -a android.intent.action.VIEW -d "$episode" -n is.xyz.mpv/.MPVActivity >/dev/null 2>&1 & ;;
         android_vlc) nohup am start --user 0 -a android.intent.action.VIEW -d "$episode" -n org.videolan.vlc/org.videolan.vlc.gui.video.VideoPlayerActivity -e "title" "${allanime_title}Episode ${ep_no}" >/dev/null 2>&1 & ;;
-        iina) nohup "$player_function" --no-stdin --keep-running --mpv-force-media-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 & ;;
+        *iina*) nohup "$player_function" --no-stdin --keep-running --mpv-force-media-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 & ;;
         flatpak_mpv) flatpak run io.mpv.Mpv --force-media-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 & ;;
         vlc*) nohup "$player_function" --play-and-exit --meta-title="${allanime_title}Episode ${ep_no}" "$episode" >/dev/null 2>&1 & ;;
         *yncpla*) nohup "$player_function" "$episode" -- --force-media-title="${allanime_title}Episode ${ep_no}" >/dev/null 2>&1 & ;;
@@ -320,9 +330,10 @@ allanime_base="allanime.day"
 allanime_api="https://api.${allanime_base}"
 mode="${ANI_CLI_MODE:-sub}"
 download_dir="${ANI_CLI_DOWNLOAD_DIR:-.}"
+log_episode="${ANI_CLI_LOG:-1}"
 quality="${ANI_CLI_QUALITY:-best}"
 case "$(uname -a)" in
-    *Darwin*) player_function="${ANI_CLI_PLAYER:-iina}" ;;            # mac OS
+    *Darwin*) player_function="$(where_iina)" ;;                      # mac OS
     *ndroid*) player_function="${ANI_CLI_PLAYER:-android_mpv}" ;;     # Android OS (termux)
     *neptune*) player_function="${ANI_CLI_PLAYER:-flatpak_mpv}" ;;    # steamdeck OS
     *MINGW* | *WSL2*) player_function="${ANI_CLI_PLAYER:-mpv.exe}" ;; # Windows OS
@@ -379,6 +390,14 @@ while [ $# -gt 0 ]; do
             : >"$histfile"
             exit 0
             ;;
+        -l | --logview)
+            case "$(uname -s)" in
+                Darwin*) log show --predicate 'process == "logger"' ;;
+                Linux*) journalctl -t ani-cli ;;
+                *) die "Logger not implemented for your platform" ;;
+            esac
+            exit 0
+            ;;
         -V | --version) version_info ;;
         -h | --help) help_info ;;
         -e | --episode | -r | --range)
@@ -418,6 +437,7 @@ case "$player_function" in
         ;;
     android*) printf "\33[2K\rChecking of players on Android is disabled\n" ;;
     *iSH*) printf "\33[2K\rChecking of players on iOS is disabled\n" ;;
+    *iina*) true ;; # handled out of band in where_iina
     *) dep_ch "$player_function" ;;
 esac
 
